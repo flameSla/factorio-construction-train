@@ -1,0 +1,4 @@
+*.lnk
+__pycache__
+*.pyc
+*.txt
