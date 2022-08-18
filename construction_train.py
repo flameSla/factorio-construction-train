@@ -10,6 +10,7 @@ import sys
 import os
 import argparse
 import math
+import uuid
 
 
 #############################################
@@ -73,18 +74,18 @@ def new_bp():
     bp = collections.OrderedDict()
     bp['blueprint'] = collections.OrderedDict()
     # bp['blueprint']['description'] = str()
-    # bp['blueprint']['icons'] = list()
-    # bp['blueprint']['icons'].append(dict([('signal',
-    #                                        dict([('type', 'item'),
-    #                                              ('name', 'rail')])),
-    #                                       ('index', 1)]))
+    bp['blueprint']['icons'] = list()
+    bp['blueprint']['icons'].append(dict([('signal',
+                                         dict([('type', 'virtual'),
+                                               ('name', 'signal-B')])),
+                                          ('index', 1)]))
     bp['blueprint']['entities'] = list()
     # bp['blueprint']['tiles'] = list()
     # bp['blueprint']['schedules'] = list()
     bp['blueprint']['item'] = 'blueprint'
     bp['blueprint']['label'] = str()
     # bp['blueprint']['label_color']
-    # bp['blueprint']['version'] = 281479275937792 ????
+    bp['blueprint']['version'] = 281479275937792
 
     return bp
 
@@ -131,6 +132,17 @@ def entity_add_items(entity, item):
 
 
 #############################################
+def set_inventory_filter(entity, filtr):
+    if 'inventory' not in entity:
+        entity['inventory'] = dict()
+
+    if 'filters' not in entity['inventory']:
+        entity['inventory']['filters'] = list()
+
+    entity['inventory']['filters'].append(filtr)
+
+
+#############################################
 def get_items():
     # read json file
     with open('items.json', 'r') as read_file:
@@ -145,7 +157,7 @@ def get_items():
 
 
 #############################################
-def add_train(bp, train_number, locomotives, cars):
+def add_train(bp, train_number, locomotives, cars, station_name):
     train_car_position = 0
 
     train_length = (locomotives + cars)*7 - 1
@@ -158,6 +170,14 @@ def add_train(bp, train_number, locomotives, cars):
                           direction=2)
         bp['blueprint']['entities'].append(rail)
 
+    train_stop = new_entity(bp,
+                            'train-stop',
+                            7 * train_car_position + 1,
+                            train_number*4 - 1,
+                            direction=6)
+    train_stop['station'] = station_name
+    bp['blueprint']['entities'].append(train_stop)
+
     for i in range(locomotives):
         locomotive = new_entity(bp,
                                 'locomotive',
@@ -169,6 +189,137 @@ def add_train(bp, train_number, locomotives, cars):
         train_car_position += 1
 
     return train_car_position
+
+
+#############################################
+def add_wagon(bp, train_car_position, train_number):
+    return new_entity(bp,
+                      'cargo-wagon',
+                      7 * train_car_position + 4,
+                      train_number*4 + 1,
+                      orientation=0.75)
+
+
+#############################################
+def wagon_close_slots(cargo_wagon, slot_count):
+    if slot_count < 40:
+        cargo_wagon['inventory']['bar'] = slot_count
+    while slot_count < 40:
+        set_inventory_filter(cargo_wagon,
+                             {"index": slot_count + 1, "name": "linked-chest"})
+        slot_count += 1
+
+
+#############################################
+def append_chests(bp, filtrs, train_car_position, train_number, items):
+    pos = 0
+    for key, val in filtrs.items():
+        inserter = new_entity(bp,
+                              'stack-inserter',
+                              7 * train_car_position + 1.5 + pos,
+                              train_number*4 - 0.5)
+        bp['blueprint']['entities'].append(inserter)
+
+        requester = new_entity(bp,
+                               'logistic-chest-requester',
+                               7 * train_car_position + 1.5 + pos,
+                               train_number*4 - 1.5)
+        requester['request_filters'] = list()
+        requester['request_filters'].append({"index": 1,
+                                             "name": key,
+                                             "count": items[key]})
+        requester['request_from_buffers'] = 'true'
+        bp['blueprint']['entities'].append(requester)
+
+        pos += 1
+    filtrs.clear()
+
+
+#############################################
+def requester_trains(bp, contents, train_number, train_car_position,
+                     locomotives, cars, station_name):
+
+    cargo_wagon = add_wagon(bp, train_car_position, train_number)
+
+    slot_count = 0
+    items = get_items()
+    for item, amount in contents.items():
+        stack_size = items[item]
+
+        while amount > 0:
+            slots = math.ceil(amount/stack_size)
+            if slot_count + slots >= 40:
+                add_items = (40 - slot_count) * stack_size
+                amount -= add_items
+                entity_add_items(cargo_wagon, dict([(item, add_items)]))
+                # Add a new wagon
+                train_car_position += 1
+                if train_car_position >= locomotives + cars:
+                    train_number += 1
+                    train_car_position = add_train(bp,
+                                                   train_number,
+                                                   locomotives,
+                                                   cars,
+                                                   station_name)
+
+                bp['blueprint']['entities'].append(cargo_wagon)
+                slot_count = 0
+                cargo_wagon = add_wagon(bp, train_car_position, train_number)
+
+            else:
+                entity_add_items(cargo_wagon, dict([(item, amount)]))
+                amount = 0
+                slot_count += slots
+
+    bp['blueprint']['entities'].append(cargo_wagon)
+
+
+#############################################
+def filtered_train(bp, contents, train_number, train_car_position,
+                   locomotives, cars, station_name):
+
+    cargo_wagon = add_wagon(bp, train_car_position, train_number)
+
+    slot_count = 0
+    filtrs = dict()
+    items = get_items()
+    for item, amount in contents.items():
+        stack_size = items[item]
+        slots = math.ceil(amount/stack_size)
+        # print("{}: {} ( {} slots -> {} )".format(item, amount, slots,
+        #                                          slots*stack_size))
+
+        for _ in range(slots):
+            new_item = item not in filtrs
+            if slot_count >= 40 or (len(filtrs) >= 6 and new_item):
+                # Add a new wagon
+                wagon_close_slots(cargo_wagon, slot_count)
+                append_chests(bp, filtrs,
+                              train_car_position, train_number, items)
+
+                train_car_position += 1
+                if train_car_position >= locomotives + cars:
+                    train_number += 1
+                    train_car_position = add_train(bp,
+                                                   train_number,
+                                                   locomotives,
+                                                   cars,
+                                                   station_name)
+
+                bp['blueprint']['entities'].append(cargo_wagon)
+                slot_count = 0
+                cargo_wagon = add_wagon(bp, train_car_position, train_number)
+
+            set_inventory_filter(cargo_wagon,
+                                 {"index": slot_count + 1, "name": item})
+            add_dictionaries(filtrs, {item: 1})
+
+            slot_count += 1
+
+    wagon_close_slots(cargo_wagon, slot_count)
+    append_chests(bp, filtrs, train_car_position, train_number, items)
+
+    bp['blueprint']['entities'].append(cargo_wagon)
 
 
 #############################################
@@ -192,51 +343,23 @@ def get_bp(locomotives, cars, necessary_items_for_construction):
     add_dictionaries(contents, necessary_items_for_construction)
 
     bp = new_bp()
-    items = get_items()
 
     train_number = 0
-    train_car_position = add_train(bp, train_number, locomotives, cars)
+    station_name = str(uuid.uuid4())
+    train_car_position = add_train(bp, train_number,
+                                   locomotives, cars, station_name)
 
-    cargo_wagon = new_entity(bp,
-                             'cargo-wagon',
-                             7 * train_car_position + 4,
-                             train_number*4 + 1,
-                             orientation=0.75)
+    print("1 - requester trains")
+    print("2 - filtered train")
+    print("?")
 
-    slot_count = 0
-
-    for item, amount in contents.items():
-        stack_size = items[item]
-
-        while amount > 0:
-            slots = math.ceil(amount/stack_size)
-            if slot_count + slots >= 40:
-                add_items = (40 - slot_count) * stack_size
-                amount -= add_items
-                entity_add_items(cargo_wagon, dict([(item, add_items)]))
-                # Add a new wagon
-                train_car_position += 1
-                if train_car_position >= locomotives+cars:
-                    train_number += 1
-                    train_car_position = add_train(bp,
-                                                   train_number,
-                                                   locomotives,
-                                                   cars)
-
-                bp['blueprint']['entities'].append(cargo_wagon)
-                slot_count = 0
-                cargo_wagon = new_entity(bp,
-                                         'cargo-wagon',
-                                         7 * train_car_position + 4,
-                                         train_number*4 + 1,
-                                         orientation=0.75)
-            else:
-                entity_add_items(cargo_wagon, dict([(item, amount)]))
-                amount = 0
-                slot_count += slots
-
-    # Add the last wagon if we didn't exceed the inventory
-    bp['blueprint']['entities'].append(cargo_wagon)
+    choise = int(input())
+    if choise == 1:
+        requester_trains(bp, contents, train_number, train_car_position,
+                         locomotives, cars, station_name)
+    elif choise == 2:
+        filtered_train(bp, contents, train_number, train_car_position,
+                       locomotives, cars, station_name)
 
     bp['blueprint']['label_color'] = {"r": 1, "g": 0, "b": 1}
     bp['blueprint']['label'] = "{}-{} construction_train".format(locomotives,
