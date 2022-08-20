@@ -25,13 +25,24 @@ def debug(*args):
 
 
 #############################################
-def add_dictionaries(a, b):
-    # a = a + b
-    for key, value in b.items():
-        if key in a:
-            a[key] += value
-        else:
-            a[key] = value
+class dict_bp(dict):
+
+    def __add__(self, other):
+        temp = dict_bp(self)
+        for key, value in other.items():
+            if key in temp:
+                temp[key] += value
+            else:
+                temp[key] = value
+        return temp
+
+    def __iadd__(self, other):
+        for key, value in other.items():
+            if key in self:
+                self[key] += value
+            else:
+                self[key] = value
+        return self
 
 
 #############################################
@@ -47,18 +58,14 @@ def parse_blueprint(bp, necessary_items_for_construction):
         for entity in bp['blueprint']['entities']:
             debug(entity)
             if entity['name'] == 'curved-rail':
-                add_dictionaries(necessary_items_for_construction,
-                                 {"rail": 4})
+                necessary_items_for_construction += {"rail": 4}
             elif entity["name"] == 'straight-rail':
-                add_dictionaries(necessary_items_for_construction,
-                                 {"rail": 1})
+                necessary_items_for_construction += {"rail": 1}
             else:
-                add_dictionaries(necessary_items_for_construction,
-                                 {entity["name"]: 1})
+                necessary_items_for_construction += {entity["name"]: 1}
             if 'items' in entity:
                 debug(entity['items'], '\t', type(entity['items']))
-                add_dictionaries(necessary_items_for_construction,
-                                 entity['items'])
+                necessary_items_for_construction += entity['items']
         debug('---------------------------------------------------')
 
 
@@ -281,7 +288,7 @@ def filtered_train(bp, contents, train_number, train_car_position,
     cargo_wagon = add_wagon(bp, train_car_position, train_number)
 
     slot_count = 0
-    filtrs = dict()
+    filtrs = dict_bp()
     items = get_items()
     for item, amount in contents.items():
         stack_size = items[item]
@@ -312,7 +319,7 @@ def filtered_train(bp, contents, train_number, train_car_position,
 
             set_inventory_filter(cargo_wagon,
                                  {"index": slot_count + 1, "name": item})
-            add_dictionaries(filtrs, {item: 1})
+            filtrs += {item: 1}
 
             slot_count += 1
 
@@ -325,22 +332,19 @@ def filtered_train(bp, contents, train_number, train_car_position,
 #############################################
 def get_bp(locomotives, cars, necessary_items_for_construction):
     # "item name": amount
-    additional_items = {
+    additional_items = dict_bp({
         "construction-robot": 1350,
         "logistic-robot": 350,
         "radar": 50,
         "repair-pack": 100,
         "cliff-explosives": 100,
         "laser-turret": 50
-    }
+    })
 
     print("additional items:")
     print_dict(additional_items)
 
-    # contents = additional_items + necessary_items_for_construction
-    contents = dict()
-    add_dictionaries(contents, additional_items)
-    add_dictionaries(contents, necessary_items_for_construction)
+    contents = additional_items + necessary_items_for_construction
 
     bp = new_bp()
 
@@ -394,7 +398,7 @@ if __name__ == "__main__":
         bp_json = json.loads(json_str,
                              object_pairs_hook=collections.OrderedDict)
 
-        necessary_items_for_construction = dict()
+        necessary_items_for_construction = dict_bp()
         parse_blueprint(bp_json, necessary_items_for_construction)
         print("bp contains:")
         print_dict(necessary_items_for_construction)
