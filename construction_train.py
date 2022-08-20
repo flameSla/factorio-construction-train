@@ -66,6 +66,10 @@ def parse_blueprint(bp, necessary_items_for_construction):
             if 'items' in entity:
                 debug(entity['items'], '\t', type(entity['items']))
                 necessary_items_for_construction += entity['items']
+        if 'tiles' in bp['blueprint']:
+            for tile in bp['blueprint']['tiles']:
+                necessary_items_for_construction += {tile['name']: 1}
+
         debug('---------------------------------------------------')
 
 
@@ -253,6 +257,17 @@ def requester_trains(bp, contents, train_number, train_car_position,
     for item, amount in contents.items():
         stack_size = items[item]
 
+        if item == 'landfill':
+            bp['blueprint']['entities'].append(cargo_wagon)
+            train_number += 1
+            train_car_position = add_train(bp,
+                                           train_number,
+                                           locomotives,
+                                           cars,
+                                           station_name)
+            slot_count = 0
+            cargo_wagon = add_wagon(bp, train_car_position, train_number)
+
         while amount > 0:
             slots = math.ceil(amount/stack_size)
             if slot_count + slots >= 40:
@@ -293,8 +308,20 @@ def filtered_train(bp, contents, train_number, train_car_position,
     for item, amount in contents.items():
         stack_size = items[item]
         slots = math.ceil(amount/stack_size)
-        # print("{}: {} ( {} slots -> {} )".format(item, amount, slots,
-        #                                          slots*stack_size))
+
+        if item == 'landfill':
+            wagon_close_slots(cargo_wagon, slot_count)
+            append_chests(bp, filtrs,
+                          train_car_position, train_number, items)
+            bp['blueprint']['entities'].append(cargo_wagon)
+            train_number += 1
+            train_car_position = add_train(bp,
+                                           train_number,
+                                           locomotives,
+                                           cars,
+                                           station_name)
+            slot_count = 0
+            cargo_wagon = add_wagon(bp, train_car_position, train_number)
 
         for _ in range(slots):
             new_item = item not in filtrs
